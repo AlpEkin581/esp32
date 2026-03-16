@@ -2,30 +2,41 @@
 <html>
 <head>
     <title>ESP32 Renkli Cizim</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { text-align: center; font-family: sans-serif; background: #f0f0f0; padding: 20px; }
-        canvas { border: 2px solid #333; background: white; cursor: crosshair; touch-action: none; max-width: 100%; height: auto; }
-        button { padding: 12px 24px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+        body { text-align: center; font-family: sans-serif; background: #f0f0f0; padding: 20px; margin: 0; }
+        
+        /* Çizim alanı ayarları - Dokunmatik engeli kaldırıldı */
+        canvas { 
+            border: 2px solid #333; 
+            background: white; 
+            cursor: crosshair; 
+            touch-action: none; 
+            user-select: none;
+            -webkit-user-select: none;
+            max-width: 95%; 
+            height: auto; 
+            display: block;
+            margin: 0 auto;
+        }
+
+        button { padding: 15px 25px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 8px; border: none; font-weight: bold; }
         button#connect { background-color: #4CAF50; color: white; }
         button#clear { background-color: #f44336; color: white; }
+        
         .controls { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 20px; }
-        .color-picker-container { display: flex; align-items: center; gap: 10px; }
-        label { font-weight: bold; }
+        .color-picker-container { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+        input[type="color"] { width: 50px; height: 50px; border: none; cursor: pointer; }
     </style>
-    canvas {
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-}
 </head>
 <body>
+
     <h2>ESP32 Renkli Cizim Aracı</h2>
     
     <div class="controls">
         <button id="connect">ESP32'ye Baglan</button>
         <div class="color-picker-container">
-            <label for="colorPicker">Renk Sec:</label>
+            <label>Renk Sec:</label>
             <input type="color" id="colorPicker" value="#ffffff">
         </div>
         <button id="clear">Ekranı Temizle</button>
@@ -39,70 +50,76 @@
         const ctx = canvas.getContext('2d');
         const colorPicker = document.getElementById('colorPicker');
         let painting = false;
-        let selectedColor = '#ffffff'; // Varsayılan renk beyaz
+        let selectedColor = '#ffffff';
 
-        // Renk degisimini dinle
-        colorPicker.addEventListener('input', (e) => {
-            selectedColor = e.target.value;
-        });
+        colorPicker.addEventListener('input', (e) => { selectedColor = e.target.value; });
 
-        // Bluetooth Baglantısı
+        // Bluetooth Bağlantısı
         document.getElementById('connect').addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: 'ESP32' }],
-                    optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'] // Standart Serial UUID
+                    optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
                 });
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
                 char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
-                alert("Baglandı!");
-            } catch (err) { console.log(err); alert("Hata: " + err); }
+                alert("ESP32'ye Basarıyla Baglandı!");
+            } catch (err) { 
+                alert("Baglantı Hatası: " + err + "\n\nNot: iPhone kullanıyorsan Bluefy uygulamasını dene!"); 
+            }
         });
 
-        // Cizim Fonksiyonları
-        function start(e) { painting = true; draw(e); }
+        // Çizim Fonksiyonu
+        function getPos(e) {
+            let rect = canvas.getBoundingClientRect();
+            let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: Math.floor(clientX - rect.left),
+                y: Math.floor(clientY - rect.top)
+            };
+        }
+
+        function start(e) { 
+            if (!char) { alert("Once ESP32'ye baglanmalısın!"); return; }
+            painting = true; 
+            draw(e); 
+        }
+
         function end() { painting = false; }
+
         function draw(e) {
             if (!painting || !char) return;
-            let rect = canvas.getBoundingClientRect();
-            let x = Math.floor((e.clientX || e.touches[0].clientX) - rect.left);
-            let y = Math.floor((e.clientY || e.touches[0].clientY) - rect.top);
-
-            // Web kanvasında ciz
+            let pos = getPos(e);
+            
             ctx.fillStyle = selectedColor;
-            ctx.fillRect(x, y, 2, 2);
+            ctx.fillRect(pos.x, pos.y, 4, 4); // Ekranda daha net gorunmesi icin 4x4
 
-            // Veriyi ESP32'ye gonder: "X,Y,RENK_KODU*"
-            // Renk kodunu (hex) 16 bitlik TFT renk formatına donusturmeliyiz.
-            // Bu ornekte basiti tutmak icin 8 ana renk kodu gonderelim.
-            // 1: Beyaz, 2: Kırmızı, 3: Yesil, 4: Mavi, 5: Sarı, 6: Mor, 7: Turkuaz, 8: Siyah
             let colorCode = getColorCode(selectedColor);
-            let data = new TextEncoder().encode(${x},${y},${colorCode}*);
-            char.writeValue(data);
+            let data = new TextEncoder().encode(`${pos.x},${pos.y},${colorCode}*`);
+            char.writeValue(data).catch(err => console.log(err));
         }
 
-
+        // Renk Kodları (ESP32 tarafıyla uyumlu)
         function getColorCode(hex) {
-           
-            if (hex === '#ffffff') return 1; 
-            if (hex === '#ff0000') return 2; 
-            if (hex === '#00ff00') return 3; 
-            if (hex === '#0000ff') return 4; 
-            if (hex === '#ffff00') return 5; 
-            if (hex === '#ff00ff') return 6; 
-            if (hex === '#00ffff') return 7; 
-            if (hex === '#000000') return 8; 
-            return 1; // Varsayılan beyaz
+            const colors = {
+                '#ffffff': 1, '#ff0000': 2, '#00ff00': 3, '#0000ff': 4,
+                '#ffff00': 5, '#ff00ff': 6, '#00ffff': 7, '#000000': 8
+            };
+            return colors[hex.toLowerCase()] || 1;
         }
 
+        // Olay İzleyiciler (PC ve Mobil)
         canvas.addEventListener('mousedown', start);
         canvas.addEventListener('mousemove', draw);
         window.addEventListener('mouseup', end);
-        canvas.addEventListener('touchstart', start);
-        canvas.addEventListener('touchmove', draw);
+
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); }, { passive: false });
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); }, { passive: false });
         canvas.addEventListener('touchend', end);
 
+        // Ekranı Temizleme
         document.getElementById('clear').addEventListener('click', () => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if(char) char.writeValue(new TextEncoder().encode("C*"));
